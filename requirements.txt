@@ -2,6 +2,5 @@ Flask==2.3.2
 Flask-Login==0.6.2
 Flask-Mail==0.9.1
 Werkzeug==2.3.6
-sqlite3
 cloudinary==1.36.0
 reportlab==4.0.4
