@@ -1,50 +1,104 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, send_file
+import os
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file, session
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from flask_mail import Mail, Message
 import sqlite3
-import os
-from dotenv import load_dotenv
+from werkzeug.security import generate_password_hash, check_password_hash
 import cloudinary
 import cloudinary.uploader
 from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table
-from reportlab.lib.styles import getSampleStyleSheet
-import secrets
+from reportlab.pdfgen import canvas
+import io
 
+# Flask uygulamasını başlat
 app = Flask(__name__)
-load_dotenv()
-app.secret_key = os.getenv("SECRET_KEY")
 
-mail = Mail(app)
-app.config["MAIL_SERVER"] = os.getenv("MAIL_SERVER")
-app.config["MAIL_PORT"] = os.getenv("MAIL_PORT")
-app.config["MAIL_USE_TLS"] = os.getenv("MAIL_USE_TLS")
-app.config["MAIL_USERNAME"] = os.getenv("MAIL_USERNAME")
-app.config["MAIL_PASSWORD"] = os.getenv("MAIL_PASSWORD")
+# Çevresel değişkenlerden yapılandırma yükle (Render için)
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', '106098160598010924')  # Güvenlik anahtarı
+app.config['MAIL_SERVER'] = os.getenv('MAIL_SERVER', 'smtp.gmail.com')  # E-posta sunucusu
+app.config['MAIL_PORT'] = int(os.getenv('MAIL_PORT', 587))  # E-posta portu
+app.config['MAIL_USE_TLS'] = os.getenv('MAIL_USE_TLS', 'True') == 'True'  # TLS kullanımı
+app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME', 'scamioglu@gmail.com')  # E-posta adresi
+app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD', 'zoqg ajmn idqz acgx')  # E-posta şifresi
+app.config['UPLOAD_FOLDER'] = 'uploads'  # Dosya yükleme klasörü
 
+# Cloudinary yapılandırması (dosya yükleme için)
 cloudinary.config(
-    cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
-    api_key=os.getenv("CLOUDINARY_API_KEY"),
-    api_secret=os.getenv("CLOUDINARY_API_SECRET")
+    cloud_name=os.getenv('CLOUDINARY_CLOUD_NAME', 'dmmsncj6x'),
+    api_key=os.getenv('CLOUDINARY_API_KEY', '552881692187293'),
+    api_secret=os.getenv('CLOUDINARY_API_SECRET', 'rtrD4fSHx-t1ZQOVUF225s8WNG0@')
 )
 
-login_manager = LoginManager()
-login_manager.init_app(app)
-login_manager.login_view = "login"
+# Flask-Mail ve Flask-Login'i başlat
+mail = Mail(app)
+login_manager = LoginManager(app)
+login_manager.login_view = 'login'  # Giriş yapmadan erişilemeyen sayfalar için yönlendirme
 
+# Veritabanı bağlantısı fonksiyonu
 def get_db():
-    conn = sqlite3.connect("database.db")
-    conn.row_factory = sqlite3.Row
+    conn = sqlite3.connect('database.db')  # SQLite veritabanına bağlan
+    conn.row_factory = sqlite3.Row  # Satırları sözlük gibi döndür
     return conn
 
-with get_db() as conn:
-    conn.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, username TEXT, password TEXT, role TEXT, stage_access INTEGER, reset_token TEXT, reset_expiry TEXT)")
-    conn.execute("CREATE TABLE IF NOT EXISTS stages (id INTEGER PRIMARY KEY, stage_number INTEGER, stage_name TEXT)")
-    conn.execute("CREATE TABLE IF NOT EXISTS forms (id INTEGER PRIMARY KEY, stage_id INTEGER, question TEXT, type TEXT, options TEXT, allow_file_upload INTEGER)")
-    conn.execute("CREATE TABLE IF NOT EXISTS parents (id INTEGER PRIMARY KEY, name TEXT, stage_id INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)")
-    conn.execute("CREATE TABLE IF NOT EXISTS responses (id INTEGER PRIMARY KEY, parent_id INTEGER, form_id INTEGER, answer TEXT, file_url TEXT)")
-    conn.execute("CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY, user_id INTEGER, action TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)")
+# Veritabanı tablolarını oluşturma fonksiyonu
+def init_db():
+    try:
+        conn = get_db()
+        print("Initializing database...")  # Hata ayıklama için log
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY,
+                username TEXT UNIQUE NOT NULL,
+                password TEXT NOT NULL,
+                role TEXT NOT NULL,
+                stage_access INTEGER
+            );  -- Kullanıcılar tablosu
+            CREATE TABLE IF NOT EXISTS stages (
+                id INTEGER PRIMARY KEY,
+                stage_number INTEGER,
+                stage_name TEXT
+            );  -- Aşamalar tablosu
+            CREATE TABLE IF NOT EXISTS forms (
+                id INTEGER PRIMARY KEY,
+                stage_id INTEGER,
+                question TEXT NOT NULL,
+                type TEXT NOT NULL,
+                options TEXT,
+                allow_photo_upload BOOLEAN,
+                FOREIGN KEY (stage_id) REFERENCES stages(id)
+            );  -- Formlar tablosu
+            CREATE TABLE IF NOT EXISTS responses (
+                id INTEGER PRIMARY KEY,
+                form_id INTEGER,
+                parent_name TEXT NOT NULL,
+                answer TEXT,
+                file_url TEXT,
+                FOREIGN KEY (form_id) REFERENCES forms(id)
+            );  -- Yanıtlar tablosu
+            CREATE TABLE IF NOT EXISTS logs (
+                id INTEGER PRIMARY KEY,
+                user_id INTEGER,
+                action TEXT NOT NULL,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            );  -- Günlük kaydı tablosu
+            -- Varsayılan admin kullanıcısı ekle
+            INSERT OR IGNORE INTO users (username, password, role, stage_access)
+            VALUES ('admin@example.com', 'admin123', 'admin', 0);
+        """)
+        conn.commit()
+        print("Database initialized successfully.")  # Başarıyla tamamlandıysa log
+        # Tabloyu kontrol et
+        users_table = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users';").fetchone()
+        if users_table:
+            print("Users table exists.")
+        else:
+            print("Users table does NOT exist!")
+        conn.close()
+    except Exception as e:
+        print(f"Error initializing database: {e}")  # Hata olursa log
 
+# Kullanıcı sınıfı tanımı (Flask-Login için)
 class User(UserMixin):
     def __init__(self, id, username, password, role, stage_access):
         self.id = id
@@ -53,268 +107,225 @@ class User(UserMixin):
         self.role = role
         self.stage_access = stage_access
 
+# Kullanıcı yükleme fonksiyonu (Flask-Login)
 @login_manager.user_loader
 def load_user(user_id):
     conn = get_db()
     user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
     conn.close()
     if user:
-        return User(user["id"], user["username"], user["password"], user["role"], user["stage_access"])
+        return User(user['id'], user['username'], user['password'], user['role'], user['stage_access'])
     return None
 
-@app.route("/")
+# Ana sayfa yönlendirmesi
+@app.route('/')
 def index():
-    return redirect(url_for("login"))
+    return redirect(url_for('login'))
 
-@app.route("/login", methods=["GET", "POST"])
+# Giriş sayfası
+@app.route('/login', methods=['GET', 'POST'])
 def login():
-    if request.method == "POST":
-        username = request.form["username"]
-        password = request.form["password"]
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
         conn = get_db()
-        user = conn.execute("SELECT * FROM users WHERE username = ? AND password = ?", (username, password)).fetchone()
+        user = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
         conn.close()
-        if user:
-            user_obj = User(user["id"], user["username"], user["password"], user["role"], user["stage_access"])
+        if user and user['password'] == password:  # Şifre kontrolü (düz metin)
+            user_obj = User(user['id'], user['username'], user['password'], user['role'], user['stage_access'])
             login_user(user_obj)
-            if user["role"] == "admin":
-                return redirect(url_for("admin"))
-            return redirect(url_for("staff"))
-        flash("Invalid credentials")
-    return render_template("login.html")
+            conn = get_db()
+            conn.execute("INSERT INTO logs (user_id, action) VALUES (?, ?)", (user['id'], 'Logged in'))
+            conn.commit()
+            conn.close()
+            if user['role'] == 'admin':
+                return redirect(url_for('admin'))
+            return redirect(url_for('staff'))
+        flash('Invalid username or password')
+    return render_template('login.html')
 
-@app.route("/logout")
+# Çıkış yapma
+@app.route('/logout')
 @login_required
 def logout():
+    conn = get_db()
+    conn.execute("INSERT INTO logs (user_id, action) VALUES (?, ?)", (current_user.id, 'Logged out'))
+    conn.commit()
+    conn.close()
     logout_user()
-    return redirect(url_for("login"))
+    return redirect(url_for('login'))
 
-@app.route("/reset_password", methods=["GET", "POST"])
-def reset_password():
-    if request.method == "POST":
-        email = request.form["email"]
-        conn = get_db()
-        user = conn.execute("SELECT * FROM users WHERE username = ?", (email,)).fetchone()
-        if user:
-            token = secrets.token_urlsafe(32)
-            expiry = "2025-12-31 23:59:59"
-            conn.execute("UPDATE users SET reset_token = ?, reset_expiry = ? WHERE id = ?", (token, expiry, user["id"]))
-            conn.commit()
-            msg = Message("Password Reset Request", sender=os.getenv("MAIL_USERNAME"), recipients=[email])
-            msg.body = f"Click this link to reset your password: http://localhost:5000/reset_password/{token}"
-            mail.send(msg)
-            flash("Reset link sent to your email")
-        else:
-            flash("Email not found")
-        conn.close()
-    return render_template("reset_password.html")
-
-@app.route("/reset_password/<token>", methods=["GET", "POST"])
-def reset_password_token(token):
-    if request.method == "POST":
-        new_password = request.form["password"]
-        conn = get_db()
-        user = conn.execute("SELECT * FROM users WHERE reset_token = ? AND reset_expiry > datetime('now')", (token,)).fetchone()
-        if user:
-            conn.execute("UPDATE users SET password = ?, reset_token = NULL, reset_expiry = NULL WHERE id = ?", (new_password, user["id"]))
-            conn.commit()
-            flash("Password reset successfully")
-            conn.close()
-            return redirect(url_for("login"))
-        flash("Invalid or expired token")
-        conn.close()
-    return render_template("reset_password_token.html")
-
-@app.route("/admin")
+# Admin paneli
+@app.route('/admin')
 @login_required
 def admin():
-    if current_user.role != "admin":
-        return redirect(url_for("staff"))
+    if current_user.role != 'admin':
+        return redirect(url_for('staff'))
     conn = get_db()
-    users = conn.execute("SELECT * FROM users").fetchall()
     stages = conn.execute("SELECT * FROM stages").fetchall()
-    parents = conn.execute("SELECT * FROM parents").fetchall()
+    logs = conn.execute("SELECT l.*, u.username FROM logs l JOIN users u ON l.user_id = u.id").fetchall()
     conn.close()
-    return render_template("admin.html", users=users, stages=stages, parents=parents)
+    return render_template('admin.html', stages=stages, logs=logs)
 
-@app.route("/admin/add_user", methods=["POST"])
-@login_required
-def add_user():
-    if current_user.role != "admin":
-        return redirect(url_for("staff"))
-    username = request.form["username"]
-    password = request.form["password"]
-    role = request.form["role"]
-    stage_access = request.form["stage_access"]
-    conn = get_db()
-    conn.execute("INSERT INTO users (username, password, role, stage_access) VALUES (?, ?, ?, ?)", (username, password, role, stage_access))
-    conn.execute("INSERT INTO logs (user_id, action) VALUES (?, ?)", (current_user.id, f"Added user: {username}"))
-    conn.commit()
-    conn.close()
-    flash("User added successfully")
-    return redirect(url_for("admin"))
-
-@app.route("/admin/delete_user/<int:id>")
-@login_required
-def delete_user(id):
-    if current_user.role != "admin":
-        return redirect(url_for("staff"))
-    conn = get_db()
-    conn.execute("DELETE FROM users WHERE id = ?", (id,))
-    conn.execute("INSERT INTO logs (user_id, action) VALUES (?, ?)", (current_user.id, f"Deleted user ID: {id}"))
-    conn.commit()
-    conn.close()
-    flash("User deleted successfully")
-    return redirect(url_for("admin"))
-
-@app.route("/admin/add_stage", methods=["POST"])
+# Aşama ekleme
+@app.route('/admin/add_stage', methods=['POST'])
 @login_required
 def add_stage():
-    if current_user.role != "admin":
-        return redirect(url_for("staff"))
-    stage_number = request.form["stage_number"]
-    stage_name = request.form["stage_name"]
+    if current_user.role != 'admin':
+        return redirect(url_for('staff'))
+    stage_number = int(request.form['stage_number'])
+    stage_name = request.form['stage_name']
+    if stage_number < 1:
+        flash("Stage number must be 1 or greater")
+        return redirect(url_for('admin'))
     conn = get_db()
     conn.execute("INSERT INTO stages (stage_number, stage_name) VALUES (?, ?)", (stage_number, stage_name))
     conn.execute("INSERT INTO logs (user_id, action) VALUES (?, ?)", (current_user.id, f"Added stage: {stage_name}"))
     conn.commit()
     conn.close()
     flash("Stage added successfully")
-    return redirect(url_for("admin"))
+    return redirect(url_for('admin'))
 
-@app.route("/admin/delete_stage/<int:id>")
+# Ebeveyn listesi
+@app.route('/admin/parents')
 @login_required
-def delete_stage(id):
-    if current_user.role != "admin":
-        return redirect(url_for("staff"))
+def admin_parents():
+    if current_user.role != 'admin':
+        return redirect(url_for('staff'))
     conn = get_db()
-    conn.execute("DELETE FROM stages WHERE id = ?", (id,))
-    conn.execute("INSERT INTO logs (user_id, action) VALUES (?, ?)", (current_user.id, f"Deleted stage ID: {id}"))
-    conn.commit()
+    responses = conn.execute("SELECT DISTINCT parent_name FROM responses").fetchall()
     conn.close()
-    flash("Stage deleted successfully")
-    return redirect(url_for("admin"))
+    return render_template('admin_parents.html', responses=responses)
 
-@app.route("/admin/forms")
+# Ebeveyn detayları
+@app.route('/admin/parent/<parent_name>')
+@login_required
+def admin_parent_details(parent_name):
+    if current_user.role != 'admin':
+        return redirect(url_for('staff'))
+    conn = get_db()
+    responses = conn.execute("SELECT r.*, f.question, f.type FROM responses r JOIN forms f ON r.form_id = f.id WHERE r.parent_name = ?", (parent_name,)).fetchall()
+    conn.close()
+    return render_template('admin_parent_details.html', parent_name=parent_name, responses=responses)
+
+# Raporlar sayfası
+@app.route('/admin/reports')
+@login_required
+def admin_reports():
+    if current_user.role != 'admin':
+        return redirect(url_for('staff'))
+    conn = get_db()
+    responses = conn.execute("SELECT DISTINCT parent_name FROM responses").fetchall()
+    conn.close()
+    return render_template('admin_reports.html', responses=responses)
+
+# Rapor oluşturma
+@app.route('/admin/generate_report/<parent_name>')
+@login_required
+def generate_report(parent_name):
+    if current_user.role != 'admin':
+        return redirect(url_for('staff'))
+    conn = get_db()
+    responses = conn.execute("SELECT r.*, f.question, f.type FROM responses r JOIN forms f ON r.form_id = f.id WHERE r.parent_name = ?", (parent_name,)).fetchall()
+    conn.close()
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=letter)
+    y = 750
+    c.drawString(100, y, f"Report for {parent_name}")
+    y -= 30
+    for response in responses:
+        c.drawString(100, y, f"Question: {response['question']}")
+        y -= 20
+        c.drawString(100, y, f"Answer: {response['answer']}")
+        y -= 20
+        if response['file_url']:
+            c.drawString(100, y, f"File: {response['file_url']}")
+            y -= 20
+        y -= 10
+        if y < 50:
+            c.showPage()
+            y = 750
+    c.save()
+    buffer.seek(0)
+    return send_file(buffer, as_attachment=True, download_name=f"{parent_name}_report.pdf")
+
+# Formlar sayfası
+@app.route('/admin/forms')
 @login_required
 def admin_forms():
-    if current_user.role != "admin":
-        return redirect(url_for("staff"))
+    if current_user.role != 'admin':
+        return redirect(url_for('staff'))
     conn = get_db()
     stages = conn.execute("SELECT * FROM stages").fetchall()
     forms = conn.execute("SELECT f.*, s.stage_name FROM forms f JOIN stages s ON f.stage_id = s.id").fetchall()
     conn.close()
-    return render_template("admin_forms.html", stages=stages, forms=forms)
+    return render_template('admin_forms.html', stages=stages, forms=forms)
 
-@app.route("/admin/add_form", methods=["POST"])
+# Form ekleme
+@app.route('/admin/add_form', methods=['POST'])
 @login_required
 def add_form():
-    if current_user.role != "admin":
-        return redirect(url_for("staff"))
-    stage_id = request.form["stage_id"]
-    question = request.form["question"]
-    type = request.form["type"]
-    options = request.form.get("options", "")
-    allow_file_upload = 1 if "allow_file_upload" in request.form else 0
+    if current_user.role != 'admin':
+        return redirect(url_for('staff'))
+    stage_id = request.form['stage_id']
+    question = request.form['question']
+    type = request.form['type']
+    options = request.form.get('options', '')
+    allow_photo_upload = 'allow_photo_upload' in request.form
     conn = get_db()
-    conn.execute("INSERT INTO forms (stage_id, question, type, options, allow_file_upload) VALUES (?, ?, ?, ?, ?)", (stage_id, question, type, options, allow_file_upload))
+    conn.execute("INSERT INTO forms (stage_id, question, type, options, allow_photo_upload) VALUES (?, ?, ?, ?, ?)", (stage_id, question, type, options, allow_photo_upload))
     conn.execute("INSERT INTO logs (user_id, action) VALUES (?, ?)", (current_user.id, f"Added form: {question}"))
     conn.commit()
     conn.close()
     flash("Form added successfully")
-    return redirect(url_for("admin_forms"))
+    return redirect(url_for('admin_forms'))
 
-@app.route("/staff")
+# Personel sayfası
+@app.route('/staff')
 @login_required
 def staff():
-    if current_user.role == "admin":
-        return redirect(url_for("admin"))
+    if current_user.role == 'admin':
+        return redirect(url_for('admin'))
     conn = get_db()
     stages = conn.execute("SELECT * FROM stages WHERE id = ?", (current_user.stage_access,)).fetchall()
     forms = conn.execute("SELECT * FROM forms WHERE stage_id = ?", (current_user.stage_access,)).fetchall()
     conn.close()
-    return render_template("staff.html", stages=stages, forms=forms)
+    return render_template('staff.html', stages=stages, forms=forms)
 
-@app.route("/staff/submit_form", methods=["POST"])
+# Form gönderme
+@app.route('/submit_form', methods=['POST'])
 @login_required
 def submit_form():
-    if current_user.role == "admin":
-        return redirect(url_for("admin"))
-    parent_name = request.form["parent_name"]
+    if current_user.role == 'admin':
+        return redirect(url_for('admin'))
+    parent_name = request.form['parent_name']
     conn = get_db()
-    conn.execute("INSERT INTO parents (name, stage_id) VALUES (?, ?)", (parent_name, current_user.stage_access))
-    parent_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-    for form_id in request.form:
-        if form_id.startswith("form_"):
-            form_id = form_id.replace("form_", "")
-            answer = request.form[f"form_{form_id}"]
-            file_url = None
-            if f"file_{form_id}" in request.files:
-                file = request.files[f"file_{form_id}"]
-                if file:
-                    upload_result = cloudinary.uploader.upload(file)
-                    file_url = upload_result["url"]
-            conn.execute("INSERT INTO responses (parent_id, form_id, answer, file_url) VALUES (?, ?, ?, ?)", (parent_id, form_id, answer, file_url))
+    forms = conn.execute("SELECT * FROM forms WHERE stage_id = ?", (current_user.stage_access,)).fetchall()
+    for form in forms:
+        answer = request.form.get(f'form_{form["id"]}')
+        file_url = None
+        if form['allow_photo_upload']:
+            file = request.files.get(f'file_{form["id"]}')
+            if file:
+                upload_result = cloudinary.uploader.upload(file)
+                file_url = upload_result['url']
+        if answer:
+            conn.execute("INSERT INTO responses (form_id, parent_name, answer, file_url) VALUES (?, ?, ?, ?)", (form['id'], parent_name, answer, file_url))
+    conn.execute("INSERT INTO logs (user_id, action) VALUES (?, ?)", (current_user.id, f"Submitted form for {parent_name}"))
     conn.commit()
     conn.close()
+    msg = Message('Form Submission Confirmation', sender=app.config['MAIL_USERNAME'], recipients=[current_user.username])
+    msg.body = f'Your form submission for {parent_name} has been received.'
+    mail.send(msg)
     flash("Form submitted successfully")
-    return redirect(url_for("staff"))
+    return redirect(url_for('staff'))
 
-@app.route("/admin/parents")
-@login_required
-def admin_parents():
-    if current_user.role != "admin":
-        return redirect(url_for("staff"))
-    conn = get_db()
-    parents = conn.execute("SELECT p.*, s.stage_name FROM parents p JOIN stages s ON p.stage_id = s.id").fetchall()
-    conn.close()
-    return render_template("parents.html", parents=parents)
+# Veritabanını başlat (Render'da her deploy'da çalışır)
+print("Starting database initialization...")
+init_db()
+print("Database initialization completed.")
 
-@app.route("/admin/parent/<int:id>")
-@login_required
-def parent_detail(id):
-    if current_user.role != "admin":
-        return redirect(url_for("staff"))
-    conn = get_db()
-    parent = conn.execute("SELECT p.*, s.stage_name FROM parents p JOIN stages s ON p.stage_id = s.id WHERE p.id = ?", (id,)).fetchone()
-    responses = conn.execute("SELECT r.*, f.question, f.type, f.options FROM responses r JOIN forms f ON r.form_id = f.id WHERE r.parent_id = ?", (id,)).fetchall()
-    conn.close()
-    return render_template("parent_detail.html", parent=parent, responses=responses)
-
-@app.route("/admin/report")
-@login_required
-def report():
-    if current_user.role != "admin":
-        return redirect(url_for("staff"))
-    conn = get_db()
-    parents = conn.execute("SELECT p.*, s.stage_name FROM parents p JOIN stages s ON p.stage_id = s.id").fetchall()
-    conn.close()
-    return render_template("report.html", parents=parents)
-
-@app.route("/admin/generate_pdf/<int:parent_id>")
-@login_required
-def generate_pdf(parent_id):
-    if current_user.role != "admin":
-        return redirect(url_for("staff"))
-    conn = get_db()
-    parent = conn.execute("SELECT p.*, s.stage_name FROM parents p JOIN stages s ON p.stage_id = s.id WHERE p.id = ?", (parent_id,)).fetchone()
-    responses = conn.execute("SELECT r.*, f.question FROM responses r JOIN forms f ON r.form_id = f.id WHERE r.parent_id = ?", (parent_id,)).fetchall()
-    conn.close()
-    pdf_file = f"report_{parent_id}.pdf"
-    doc = SimpleDocTemplate(pdf_file, pagesize=letter)
-    styles = getSampleStyleSheet()
-    elements = []
-    elements.append(Paragraph(f"Parent: {parent['name']}", styles["Heading1"]))
-    elements.append(Spacer(1, 12))
-    elements.append(Paragraph(f"Stage: {parent['stage_name']}", styles["Heading2"]))
-    elements.append(Spacer(1, 12))
-    data = [["Question", "Answer"]]
-    for response in responses:
-        data.append([response["question"], response["answer"] or response["file_url"]])
-    table = Table(data)
-    elements.append(table)
-    doc.build(elements)
-    return send_file(pdf_file, as_attachment=True)
-
+# Uygulamayı Render portunda çalıştır
 if __name__ == "__main__":
-    app.run(debug=True) 
+    port = int(os.getenv("PORT", 5000))  # Render PORT (varsayılan 10000), yoksa 5000
+    app.run(host="0.0.0.0", port=port, debug=True)  # Tüm arayüzlerde dinle
