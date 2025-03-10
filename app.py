@@ -144,6 +144,17 @@ def login():
         flash('Invalid username or password')
     return render_template('login.html')
 
+# Şifre sıfırlama sayfası
+@app.route('/reset_password', methods=['GET', 'POST'])
+def reset_password():
+    if request.method == 'POST':
+        email = request.form['email']
+        # Burada e-posta ile şifre sıfırlama mantığını ekleyebilirsin
+        # Örneğin, kullanıcıya bir sıfırlama bağlantısı gönder
+        flash('Şifre sıfırlama bağlantısı e-posta adresinize gönderildi (şimdilik demo).')
+        return redirect(url_for('login'))
+    return render_template('reset_password.html')
+
 # Çıkış yapma
 @app.route('/logout')
 @login_required
