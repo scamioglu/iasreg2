@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container">
+    <h2>Reports</h2>
+    <div class="mb-3">
+        <input type="text" id="search" class="form-control" placeholder="Search by parent name...">
+    </div>
+    <table class="table" id="parentsTable">
+        <thead>
+            <tr><th>ID</th><th>Name</th><th>Stage</th><th>Created At</th><th>Action</th></tr>
+        </thead>
+        <tbody>
+            {% for parent in parents %}
+            <tr>
+                <td>{{ parent.id }}</td>
+                <td>{{ parent.name }}</td>
+                <td>{{ parent.stage_name }}</td>
+                <td>{{ parent.created_at }}</td>
+                <td><a href="{{ url_for('generate_pdf', parent_id=parent.id) }}" class="btn btn-primary">Download PDF</a></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+<script>
+document.getElementById('search').addEventListener('input', function() {
+    const search = this.value.toLowerCase();
+    const rows = document.querySelectorAll('#parentsTable tbody tr');
+    rows.forEach(row => {
+        const name = row.cells[1].textContent.toLowerCase();
+        row.style.display = name.includes(search) ? '' : 'none';
+    });
+});
+</script>
+{% endblock %}

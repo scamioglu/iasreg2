@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container">
+    <h2>Staff Form (Stage {{ stages[0].stage_name }})</h2>
+    <form method="POST" action="{{ url_for('submit_form') }}" enctype="multipart/form-data">
+        <div class="mb-3">
+            <label>Parent Name (e.g., John Doe):</label>
+            <input type="text" name="parent_name" class="form-control" required>
+        </div>
+        {% for form in forms %}
+        <div class="mb-3">
+            <label>{{ form.question }}</label>
+            {% if form.type == "text" %}
+                <input type="text" name="form_{{ form.id }}" class="form-control" required>
+            {% elif form.type == "select" %}
+                <select name="form_{{ form.id }}" class="form-control" required>
+                    {% for option in form.options.split(',') %}
+                    <option value="{{ option }}">{{ option }}</option>
+                    {% endfor %}
+                </select>
+            {% elif form.type == "checkbox" %}
+                {% for option in form.options.split(',') %}
+                <div>
+                    <input type="checkbox" name="form_{{ form.id }}" value="{{ option }}"> {{ option }}
+                </div>
+                {% endfor %}
+            {% elif form.type == "file" %}
+                <input type="file" name="file_{{ form.id }}" class="form-control" accept="image/*" capture="camera">
+            {% endif %}
+        </div>
+        {% endfor %}
+        <button type="submit" class="btn btn-primary">Submit</button>
+    </form>
+</div>
+{% endblock %}

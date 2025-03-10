@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container">
+    <h2>Admin Dashboard</h2>
+    <h3>Add User</h3>
+    <form method="POST" action="{{ url_for('add_user') }}">
+        <div class="mb-3">
+            <label>Username (e.g., email):</label>
+            <input type="text" name="username" class="form-control" required>
+        </div>
+        <div class="mb-3">
+            <label>Password:</label>
+            <input type="password" name="password" class="form-control" required>
+        </div>
+        <div class="mb-3">
+            <label>Role (admin or staff):</label>
+            <select name="role" class="form-control">
+                <option value="admin">Admin</option>
+                <option value="staff">Staff</option>
+            </select>
+        </div>
+        <div class="mb-3">
+            <label>Stage Access (e.g., 1 for Stage 1):</label>
+            <input type="number" name="stage_access" class="form-control" required>
+        </div>
+        <button type="submit" class="btn btn-success">Add User</button>
+    </form>
+    <h3>Users</h3>
+    <table class="table">
+        <thead>
+            <tr><th>ID</th><th>Username</th><th>Role</th><th>Stage Access</th><th>Action</th></tr>
+        </thead>
+        <tbody>
+            {% for user in users %}
+            <tr>
+                <td>{{ user.id }}</td>
+                <td>{{ user.username }}</td>
+                <td>{{ user.role }}</td>
+                <td>{{ user.stage_access }}</td>
+                <td><a href="{{ url_for('delete_user', id=user.id) }}" class="btn btn-danger">Delete</a></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <h3>Add Stage</h3>
+    <form method="POST" action="{{ url_for('add_stage') }}">
+        <div class="mb-3">
+            <label>Stage Number (e.g., 1):</label>
+            <input type="number" name="stage_number" class="form-control" required>
+        </div>
+        <div class="mb-3">
+            <label>Stage Name (e.g., Initial Meeting):</label>
+            <input type="text" name="stage_name" class="form-control" required>
+        </div>
+        <button type="submit" class="btn btn-success">Add Stage</button>
+    </form>
+    <h3>Stages</h3>
+    <table class="table">
+        <thead>
+            <tr><th>ID</th><th>Number</th><th>Name</th><th>Action</th></tr>
+        </thead>
+        <tbody>
+            {% for stage in stages %}
+            <tr>
+                <td>{{ stage.id }}</td>
+                <td>{{ stage.stage_number }}</td>
+                <td>{{ stage.stage_name }}</td>
+                <td><a href="{{ url_for('delete_stage', id=stage.id) }}" class="btn btn-danger">Delete</a></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

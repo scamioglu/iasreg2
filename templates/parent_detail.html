@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container">
+    <h2>Parent: {{ parent.name }}</h2>
+    <p>Stage: {{ parent.stage_name }}</p>
+    <p>Created At: {{ parent.created_at }}</p>
+    <h3>Responses</h3>
+    <table class="table">
+        <thead>
+            <tr><th>Question</th><th>Answer</th></tr>
+        </thead>
+        <tbody>
+            {% for response in responses %}
+            <tr>
+                <td>{{ response.question }}</td>
+                <td>
+                    {% if response.file_url %}
+                    <a href="{{ response.file_url }}" target="_blank">View Photo</a>
+                    {% else %}
+                    {{ response.answer }}
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <a href="{{ url_for('generate_pdf', parent_id=parent.id) }}" class="btn btn-primary">Download PDF</a>
+</div>
+{% endblock %}

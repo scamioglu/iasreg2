@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container">
+    <h2>Forms</h2>
+    <ul class="nav nav-tabs">
+        {% for stage in stages %}
+        <li class="nav-item">
+            <a class="nav-link {% if loop.first %}active{% endif %}" data-bs-toggle="tab" href="#stage_{{ stage.id }}">{{ stage.stage_name }}</a>
+        </li>
+        {% endfor %}
+    </ul>
+    <div class="tab-content mt-3">
+        {% for stage in stages %}
+        <div class="tab-pane fade {% if loop.first %}show active{% endif %}" id="stage_{{ stage.id }}">
+            <h3>Add Form to {{ stage.stage_name }}</h3>
+            <form method="POST" action="{{ url_for('add_form') }}">
+                <input type="hidden" name="stage_id" value="{{ stage.id }}">
+                <div class="mb-3">
+                    <label>Question (e.g., What is your name?):</label>
+                    <input type="text" name="question" class="form-control" required>
+                </div>
+                <div class="mb-3">
+                    <label>Type:</label>
+                    <select name="type" class="form-control" onchange="toggleOptions(this)">
+                        <option value="text">Text</option>
+                        <option value="select">Multiple Choice</option>
+                        <option value="checkbox">Checkbox</option>
+                        <option value="file">File Upload</option>
+                    </select>
+                </div>
+                <div class="mb-3 options" style="display: none;">
+                    <label>Options (comma-separated, e.g., Yes,No):</label>
+                    <input type="text" name="options" class="form-control">
+                </div>
+                <div class="mb-3">
+                    <label><input type="checkbox" name="allow_file_upload"> Allow Photo Upload</label>
+                </div>
+                <button type="submit" class="btn btn-success">Add Form</button>
+            </form>
+            <h3>Forms in {{ stage.stage_name }}</h3>
+            <table class="table">
+                <thead>
+                    <tr><th>ID</th><th>Question</th><th>Type</th><th>Options</th><th>File Upload</th></tr>
+                </thead>
+                <tbody>
+                    {% for form in forms if form.stage_id == stage.id %}
+                    <tr>
+                        <td>{{ form.id }}</td>
+                        <td>{{ form.question }}</td>
+                        <td>{{ form.type }}</td>
+                        <td>{{ form.options }}</td>
+                        <td>{{ 'Yes' if form.allow_file_upload else 'No' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+<script>
+function toggleOptions(select) {
+    const optionsDiv = select.closest('form').querySelector('.options');
+    if (select.value === 'select' || select.value === 'checkbox') {
+        optionsDiv.style.display = 'block';
+    } else {
+        optionsDiv.style.display = 'none';
+    }
+}
+</script>
+{% endblock %}
